@@ -1,0 +1,5 @@
+{
+  "message": "what documents do you have?",
+  "use_rag": true,
+  "top_k": 3
+}

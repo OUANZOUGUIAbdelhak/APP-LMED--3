@@ -1,0 +1,245 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #1380F5;
+  --color-primary-dark: #0F62A6;
+  --color-sidebar-bg: #F6F8FB;
+  --color-toolbar-bg: #FAFBFD;
+  --color-border: #E6E9EE;
+  --color-editor-bg: #FFFFFF;
+  --color-chat-user: #E6F0FF;
+  --color-chat-assistant: #F3F4F6;
+  --color-text-primary: #111827;
+  --color-text-muted: #6B7280;
+  --font-base: 14px;
+  --space-md: 16px;
+}
+
+.dark {
+  --color-sidebar-bg: #1E1E1E;
+  --color-toolbar-bg: #2D2D2D;
+  --color-border: #3D3D3D;
+  --color-editor-bg: #252525;
+  --color-chat-user: #1A3A5C;
+  --color-chat-assistant: #2D2D2D;
+  --color-text-primary: #E5E7EB;
+  --color-text-muted: #9CA3AF;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', 'Roboto', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  background-color: var(--color-editor-bg);
+  color: var(--color-text-primary);
+  overflow: hidden;
+}
+
+#root {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Custom Split Pane Styles */
+.Resizer {
+  background: var(--color-border);
+  opacity: 1;
+  z-index: 1;
+  box-sizing: border-box;
+  background-clip: padding-box;
+}
+
+.Resizer:hover {
+  transition: all 200ms ease;
+}
+
+.Resizer.horizontal {
+  height: 11px;
+  margin: -5px 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  cursor: row-resize;
+  width: 100%;
+}
+
+.Resizer.horizontal:hover {
+  border-top: 5px solid rgba(19, 128, 245, 0.2);
+  border-bottom: 5px solid rgba(19, 128, 245, 0.2);
+}
+
+.Resizer.vertical {
+  width: 3px;
+  cursor: col-resize;
+  transition: background-color 200ms ease;
+}
+
+.Resizer.vertical:hover {
+  background-color: #1380F5;
+}
+
+.Resizer.disabled {
+  cursor: not-allowed;
+}
+
+.Resizer.disabled:hover {
+  border-color: transparent;
+}
+
+/* Markdown Editor Styles */
+.EasyMDEContainer {
+  height: 100%;
+}
+
+.EasyMDEContainer .CodeMirror {
+  height: calc(100vh - 200px);
+  border: none;
+  font-size: 14px;
+  font-family: 'Inter', 'Segoe UI', 'Roboto', system-ui, sans-serif;
+}
+
+.EasyMDEContainer .editor-toolbar {
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  background: transparent;
+}
+
+/* React Quill Styles */
+.ql-container {
+  font-family: 'Inter', 'Segoe UI', 'Roboto', system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.ql-editor {
+  min-height: 400px;
+}
+
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  z-index: 1000;
+  min-width: 200px;
+}
+
+.dark .context-menu {
+  background: #2D2D2D;
+  border-color: #3D3D3D;
+}
+
+.context-menu-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  transition: background-color 150ms ease;
+}
+
+.context-menu-item:hover {
+  background-color: #F3F4F6;
+}
+
+.dark .context-menu-item:hover {
+  background-color: #3D3D3D;
+}
+
+.context-menu-item.danger:hover {
+  background-color: #FEE2E2;
+  color: #DC2626;
+}
+
+.dark .context-menu-item.danger:hover {
+  background-color: #7F1D1D;
+  color: #FCA5A5;
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 4px 0;
+}
+
+/* Animations */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-slide-in {
+  animation: slideIn 200ms ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 200ms ease-out;
+}
+
+/* PDF Viewer */
+.react-pdf__Page {
+  margin: 16px 0;
+}
+
+.react-pdf__Page__canvas {
+  max-width: 100%;
+  height: auto !important;
+}
+
+.react-pdf__Page__textContent {
+  display: none;
+}
+
