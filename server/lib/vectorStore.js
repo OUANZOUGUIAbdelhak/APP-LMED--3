@@ -87,6 +87,48 @@ export class VectorStore {
     scores.sort((a, b) => b.score - a.score);
     return scores.slice(0, topK);
   }
+
+  /**
+   * Delete a document by docId or by filename
+   */
+  async deleteDocument(docIdOrFilename) {
+    // Try to find by docId first
+    let docId = docIdOrFilename;
+    if (!this.index.documents[docId]) {
+      // Try to find by filename
+      for (const [id, doc] of Object.entries(this.index.documents)) {
+        if (doc.filename === docIdOrFilename || doc.filename.endsWith(docIdOrFilename)) {
+          docId = id;
+          break;
+        }
+      }
+    }
+
+    if (!this.index.documents[docId]) {
+      console.warn(`Document not found for deletion: ${docIdOrFilename}`);
+      return false;
+    }
+
+    // Store filename before deletion for logging
+    const filename = this.index.documents[docId].filename;
+
+    // Remove document metadata
+    delete this.index.documents[docId];
+    
+    // Remove all chunks for this document
+    this.index.chunks = this.index.chunks.filter(ch => ch.docId !== docId);
+    
+    this._save();
+    console.log(`✅ Deleted document: ${docId} (${filename || docIdOrFilename})`);
+    return true;
+  }
+
+  /**
+   * Delete a document by savedFilename (the timestamped filename)
+   */
+  async deleteByFilename(savedFilename) {
+    return this.deleteDocument(savedFilename);
+  }
 }
 
 

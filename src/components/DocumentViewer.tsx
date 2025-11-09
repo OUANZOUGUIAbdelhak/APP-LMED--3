@@ -900,7 +900,9 @@ export const DocumentViewer = () => {
       if (baseUrl.endsWith('/api')) {
         baseUrl = baseUrl.slice(0, -4);
       }
-      return `${baseUrl}/uploads/${activeFile.savedFilename}`;
+      // Properly encode the filename for URL (handles spaces and special characters)
+      const encodedFilename = encodeURIComponent(activeFile.savedFilename);
+      return `${baseUrl}/uploads/${encodedFilename}`;
     }
     
     // If content is available for binary files, create blob URL

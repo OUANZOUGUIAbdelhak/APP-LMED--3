@@ -127,7 +127,23 @@ export const useFileSystemStore = create<FileSystemState>()(
         return id;
       },
 
-      deleteFile: (id) => {
+      deleteFile: async (id) => {
+        const file = findFileById(get().files, id);
+        
+        // Delete from backend vector store if it has docId or savedFilename
+        if (file) {
+          try {
+            const { deleteDocument } = await import('../services/api');
+            if (file.docId) {
+              await deleteDocument(file.docId).catch(err => console.warn('Failed to delete from backend:', err));
+            } else if (file.savedFilename) {
+              await deleteDocument(file.savedFilename).catch(err => console.warn('Failed to delete from backend:', err));
+            }
+          } catch (err) {
+            console.warn('Error importing deleteDocument:', err);
+          }
+        }
+        
         set(state => ({
           files: removeFileById(state.files, id),
           activeFileId: state.activeFileId === id ? null : state.activeFileId,

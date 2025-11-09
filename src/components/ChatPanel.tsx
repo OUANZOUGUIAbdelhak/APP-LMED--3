@@ -53,9 +53,9 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
         {isUser ? <User size={16} /> : <Bot size={16} />}
       </div>
 
-      <div className={`flex flex-col gap-1 max-w-[75%]`}>
+      <div className={`flex flex-col gap-1 max-w-[75%] min-w-0`}>
         <div className={`
-          px-4 py-2 rounded-2xl
+          px-4 py-2 rounded-2xl break-words
           ${isUser 
             ? 'bg-chat-user-light dark:bg-chat-user-dark rounded-tr-sm' 
             : 'bg-chat-assistant-light dark:bg-chat-assistant-dark rounded-tl-sm'}
@@ -67,7 +67,7 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
             </div>
           )}
           
-          <div className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="prose prose-sm dark:prose-invert max-w-none break-words" style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
             <ReactMarkdown>{message.content}</ReactMarkdown>
           </div>
 

@@ -17,7 +17,7 @@ import { toolSpecs, executeTool } from './tools/index.js';
 export async function runAgentLoop({ message, history = [], retrieved = [], apiKey, model, uploadsDir, activeDocument, hasRelevantDocs = true }) {
   const groq = new Groq({ apiKey });
 
-  const systemPrompt = buildSystemPrompt(retrieved, activeDocument, hasRelevantDocs);
+  const systemPrompt = buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs);
   const messages = [
     { role: 'system', content: systemPrompt },
     ...history.slice(-6),
@@ -28,8 +28,18 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
   let currentMessages = [...messages];
   const maxIterations = 10;
   
-  // Disable tools if RAG sources are already provided
-  const enableTools = retrieved.length === 0;
+  // Detect meta-questions that need tools even if RAG found results
+  const metaQuestionPatterns = [
+    /what (files|documents|files and folders) (do I have|are in|are there)/i,
+    /list (all )?(my )?(files|documents|files and folders)/i,
+    /show me (all )?(my )?(files|documents|files and folders)/i,
+    /what's in (my )?(workspace|folder|directory)/i,
+    /(list|show|what) (all )?files/i
+  ];
+  const isMetaQuestion = metaQuestionPatterns.some(pattern => pattern.test(message));
+  
+  // Enable tools if no RAG results OR if it's a meta-question (workspace listing)
+  const enableTools = retrieved.length === 0 || isMetaQuestion;
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     let completion;
@@ -40,6 +50,7 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
         max_tokens: 1200,
         messages: currentMessages,
         tools: enableTools && toolSpecs.length > 0 ? toolSpecs : undefined,
+        tool_choice: enableTools && toolSpecs.length > 0 ? 'auto' : undefined,
       });
     } catch (err) {
       console.error('Groq API error:', err.message);
@@ -90,30 +101,69 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
   };
 }
 
-function buildSystemPrompt(retrieved, activeDocument, hasRelevantDocs) {
+function buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs) {
   let baseInstructions = `You are a helpful AI assistant with access to a document workspace.
 
 **Workspace**: All user documents are in a dedicated uploads directory. Use relative paths (e.g., "document.pdf", "folder/file.txt") when calling tools.
 
 **Available Tools**:
-- \`list_dir\`: List files/folders in workspace (use "." for root)
-- \`extract_document\`: Extract full text from a document (PDF, DOCX, TXT, XLSX)
-- \`read_file\`: Read specific lines from a text file
-- \`grep_files\`: Search for content across files`;
+- list_dir: List files and folders in the workspace
+- extract_document: Extract full text from a document (PDF, DOCX, TXT, XLSX)
+- read_file: Read specific lines from a text file
+- grep_files: Search for content across files`;
 
   if (activeDocument) {
     baseInstructions += `\n\n**IMPORTANT**: The user is currently viewing/asking about the document: "${activeDocument}"
 When the user says "this document" or "the document", they are referring to "${activeDocument}".
-Use \`extract_document\` with filename="${activeDocument}" to read its content.`;
+Use extract_document tool with that filename to read its content.`;
   }
 
   baseInstructions += `\n\n**Workflow for questions**:
-1. If a specific document is mentioned or active, use \`extract_document\` with that filename
-2. If no document is specified, use \`grep_files\` to search across all documents in the workspace
-3. Analyze content and provide detailed answers with source citations
-4. Always cite sources with filename and line/page references like [filename lines X-Y]
+1. If the user asks about what documents/files they have, use the list_dir tool to get the file listing
+2. If a specific document is mentioned or active, use extract_document with that filename
+3. If no document is specified and it's not a workspace listing question, use grep_files to search across all documents
+4. For content questions, analyze and provide detailed answers with source citations
+5. Always cite sources with filename and line/page references like [filename lines X-Y] (but NOT for workspace listing questions)
 
 **Important**: If the user asks a question and no relevant information is found in the documents after searching, provide a helpful general answer based on your knowledge and clearly state that this information is not from the documents.`;
+
+  // Detect meta-questions that need list_dir
+  const metaQuestionPatterns = [
+    /what (files|documents|files and folders) (do I have|are in|are there)/i,
+    /list (all )?(my )?(files|documents|files and folders)/i,
+    /show me (all )?(my )?(files|documents|files and folders)/i,
+    /what's in (my )?(workspace|folder|directory)/i,
+    /(list|show|what) (all )?files/i
+  ];
+  const isMetaQuestion = metaQuestionPatterns.some(pattern => pattern.test(message));
+  
+  if (isMetaQuestion && retrieved.length === 0) {
+    return baseInstructions + `\n\n**CRITICAL INSTRUCTIONS FOR WORKSPACE LISTING**:
+The user is asking "what documents do I have?" or similar. This is a request to LIST FILES, not to search document content.
+
+YOU MUST:
+1. Call the list_dir tool to get the file listing from the workspace
+2. When you receive the file list, format it nicely by:
+   - Removing timestamp prefixes from filenames (e.g., "1762428737786-Linging med.pdf" → "Linging med.pdf")
+   - Presenting as a clean bulleted list
+   - Grouping similar files together
+3. Present the formatted list in a user-friendly way like:
+   "Here are the documents in your workspace:
+   
+   • Linging med.pdf
+   • Bonjour.docx
+   • Bonjour.pdf
+   • Option.pdf
+   • TOEFL_SCCORE_OUANZOUGUI_ABDELHKA(1).pdf
+   • glass_data (2).xlsx
+   • welcome.md"
+4. Do NOT mention tools, provide citations, or add "General Knowledge" messages
+
+DO NOT:
+- Explain that you're using a tool - just use it and present results
+- Provide document references or sources for file listings
+- Guess what files exist - use the tool output`;
+  }
 
   if (retrieved.length === 0 && !hasRelevantDocs) {
     return baseInstructions + `\n\n**NOTE**: No relevant documents were found in the workspace for this query. You should answer the question using your general knowledge while being helpful and accurate. Clearly mention that the answer is not based on the workspace documents.`;

@@ -132,6 +132,48 @@ export async function uploadDocument(file: File): Promise<{ id: string; status: 
 }
 
 /**
+ * Clear all documents and index
+ */
+export async function clearAllDocuments(): Promise<{ success: boolean; deletedFiles: number; message: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/documents/clear-all`, {
+      method: 'POST',
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(errorData.error || `Clear all error: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Clear all error:', error);
+    throw error;
+  }
+}
+
+/**
+ * Delete a document from the backend
+ */
+export async function deleteDocument(docIdOrFilename: string): Promise<{ success: boolean; docId: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/documents/${encodeURIComponent(docIdOrFilename)}`, {
+      method: 'DELETE',
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(errorData.error || `Delete error: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Delete error:', error);
+    throw error;
+  }
+}
+
+/**
  * Query the RAG system with a document context
  */
 export async function queryRAG(query: string, documentIds?: string[]): Promise<ChatResponse> {

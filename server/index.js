@@ -206,6 +206,65 @@ app.post('/api/documents/index-batch', async (req, res) => {
   }
 });
 
+app.post('/api/documents/clear-all', async (req, res) => {
+  try {
+    // Clear vector store
+    vectorStore.index = { documents: {}, chunks: [] };
+    vectorStore._save();
+    
+    // Delete all files in uploads directory
+    const files = fs.readdirSync(UPLOAD_DIR);
+    let deletedCount = 0;
+    for (const file of files) {
+      try {
+        const filePath = path.join(UPLOAD_DIR, file);
+        const stats = fs.statSync(filePath);
+        if (stats.isFile()) {
+          fs.unlinkSync(filePath);
+          deletedCount++;
+        }
+      } catch (err) {
+        console.warn(`Failed to delete ${file}:`, err.message);
+      }
+    }
+    
+    console.log(`🗑️  Cleared all documents: ${deletedCount} files deleted, vector store cleared`);
+    res.json({ success: true, deletedFiles: deletedCount, message: 'All documents and index cleared successfully' });
+  } catch (err) {
+    console.error('Clear all error:', err);
+    res.status(500).json({ error: 'Failed to clear documents' });
+  }
+});
+
+app.delete('/api/documents/:docIdOrFilename', async (req, res) => {
+  try {
+    const { docIdOrFilename } = req.params;
+    
+    // Delete from vector store
+    const deleted = await vectorStore.deleteDocument(docIdOrFilename);
+    
+    if (!deleted) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // Try to delete the physical file
+    const filePath = path.join(UPLOAD_DIR, docIdOrFilename);
+    try {
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+        console.log(`🗑️  Deleted file: ${filePath}`);
+      }
+    } catch (fileErr) {
+      console.warn(`⚠️  Could not delete physical file: ${filePath}`, fileErr.message);
+    }
+
+    res.json({ success: true, docId: docIdOrFilename });
+  } catch (err) {
+    console.error('Delete error:', err);
+    res.status(500).json({ error: 'Failed to delete document' });
+  }
+});
+
 app.post('/api/documents/export-docx', (req, res) => {
   try {
     const { html, fileName } = req.body || {};
@@ -335,6 +394,49 @@ app.post('/api/agent/chat', async (req, res) => {
     const sessionId = getSessionId(req);
     const history = sessionId ? memoryStore.getHistory(sessionId) : [];
 
+    // Detect meta-questions about the workspace itself (not about document content)
+    const metaQuestionPatterns = [
+      /what (files|documents|files and folders) (do I have|are in|are there)/i,
+      /list (all )?(my )?(files|documents|files and folders)/i,
+      /show me (all )?(my )?(files|documents|files and folders)/i,
+      /what's in (my )?(workspace|folder|directory)/i,
+      /(list|show|what) (all )?files/i
+    ];
+    const isMetaQuestion = metaQuestionPatterns.some(pattern => pattern.test(message));
+    
+    // For meta-questions, directly call list_dir tool instead of relying on Groq function calling
+    if (isMetaQuestion) {
+      try {
+        const { listDir } = await import('./lib/tools/listDir.js');
+        const fileList = await listDir({ target_directory: '.', recursive: false }, { uploadsDir: UPLOAD_DIR });
+        
+        // Format the file list nicely
+        const files = fileList.split('\n').filter(f => f.trim());
+        const formattedFiles = files.map(file => {
+          // Remove timestamp prefix if present (format: timestamp-filename)
+          const match = file.match(/^\d+-(.+)$/);
+          return match ? match[1] : file;
+        });
+        
+        const formattedList = formattedFiles.length > 0
+          ? `Here are the documents in your workspace:\n\n${formattedFiles.map(f => `• ${f}`).join('\n')}`
+          : 'Your workspace is empty. Upload some documents to get started!';
+        
+        if (sessionId) memoryStore.append(sessionId, { role: 'user', content: message }, { role: 'assistant', content: formattedList });
+        
+        return res.json({
+          response: formattedList,
+          timestamp: new Date().toISOString(),
+          sources: [],
+          toolCalls: [{ name: 'list_dir', args: { target_directory: '.' } }],
+          usedGeneralKnowledge: false
+        });
+      } catch (toolErr) {
+        console.error('Error calling list_dir:', toolErr);
+        // Fall through to normal agent flow if tool fails
+      }
+    }
+
     // If a document is attached inline, index it as a transient doc
     let restrictDocIds = Array.isArray(documentIds) && documentIds.length > 0 ? documentIds : undefined;
     let useRag = Boolean(restrictDocIds && restrictDocIds.length > 0);
@@ -346,11 +448,14 @@ app.post('/api/agent/chat', async (req, res) => {
       useRag = true;
     }
 
+    // Note: isMetaQuestion is already detected above if we reach here
+    
     // If no specific document context, search all documents for relevant content
     let retrieved = [];
     let hasRelevantDocs = true;
     
-    if (!useRag) {
+    // Skip RAG for meta-questions - let tools handle workspace exploration
+    if (!useRag && !isMetaQuestion) {
       // Search across all documents in the vector store
       const allDocsSearch = await vectorStore.search(message, 10); // Get more results
       
@@ -411,10 +516,14 @@ app.post('/api/agent/chat', async (req, res) => {
 
     if (sessionId) memoryStore.append(sessionId, { role: 'user', content: message }, { role: 'assistant', content: answer });
 
+    // For meta-questions (workspace listing), don't include sources and don't mark as general knowledge
+    const shouldIncludeSources = !isMetaQuestion;
+    const shouldMarkAsGeneralKnowledge = !hasRelevantDocs && !isMetaQuestion;
+
     res.json({
       response: answer,
       timestamp: new Date().toISOString(),
-      sources: retrieved.map(r => ({
+      sources: shouldIncludeSources ? retrieved.map(r => ({
         filename: r.filename,
         docId: r.docId,
         score: r.score,
@@ -423,14 +532,15 @@ app.post('/api/agent/chat', async (req, res) => {
         sheet: r.sheet || null,
         lineStart: r.lineStart,
         lineEnd: r.lineEnd
-      })),
+      })) : [],
       toolCalls: toolCalls || [],
-      usedGeneralKnowledge: !hasRelevantDocs
+      usedGeneralKnowledge: shouldMarkAsGeneralKnowledge
     });
   } catch (err) {
     console.error('Agent chat error:', err);
     console.error('Error stack:', err.stack);
-    res.status(500).json({ error: 'Agent chat failed', details: err.message });
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ error: `Agent chat failed: ${errorMessage}` });
   }
 });
 

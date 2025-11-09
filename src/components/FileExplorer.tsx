@@ -11,7 +11,9 @@ import {
   Edit2,
   Trash2,
   Download,
-  Plus
+  Plus,
+  X,
+  Trash
 } from 'lucide-react';
 import { useFileSystemStore } from '../stores/fileSystemStore';
 import { FileNode, FileType } from '../types';
@@ -55,7 +57,8 @@ const ContextMenu = ({
   onDelete, 
   onExport,
   onNewFile,
-  onNewFolder 
+  onNewFolder,
+  onClearSelection
 }: { 
   x: number; 
   y: number; 
@@ -66,6 +69,7 @@ const ContextMenu = ({
   onExport: () => void;
   onNewFile?: () => void;
   onNewFolder?: () => void;
+  onClearSelection?: () => void;
 }) => {
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -109,6 +113,15 @@ const ContextMenu = ({
           Export
         </div>
       )}
+      {onClearSelection && (
+        <>
+          <div className="context-menu-divider" />
+          <div className="context-menu-item" onClick={onClearSelection}>
+            <X size={14} />
+            Clear Selection
+          </div>
+        </>
+      )}
       <div className="context-menu-divider" />
       <div className="context-menu-item danger" onClick={onDelete}>
         <Trash2 size={14} />
@@ -138,11 +151,17 @@ const FileItem = ({ file, level }: FileItemProps) => {
   const isExpanded = expandedFolders.has(file.id);
   const isFolder = file.type === 'folder';
 
-  const handleClick = () => {
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent bubbling to parent div
     if (isFolder) {
       toggleFolder(file.id);
     } else {
-      setActiveFile(file.id);
+      // Toggle selection: if already active, deselect; otherwise select
+      if (isActive) {
+        setActiveFile(null);
+      } else {
+        setActiveFile(file.id);
+      }
     }
   };
 
@@ -185,6 +204,11 @@ const FileItem = ({ file, level }: FileItemProps) => {
 
   const handleNewFolder = () => {
     addFile('New Folder', 'folder', file.id);
+    setContextMenu(null);
+  };
+
+  const handleClearSelection = () => {
+    setActiveFile(null);
     setContextMenu(null);
   };
 
@@ -312,6 +336,7 @@ const FileItem = ({ file, level }: FileItemProps) => {
           onExport={handleExport}
           onNewFile={isFolder ? handleNewFile : undefined}
           onNewFolder={isFolder ? handleNewFolder : undefined}
+          onClearSelection={isActive ? handleClearSelection : undefined}
         />
       )}
     </>
@@ -392,13 +417,55 @@ export const FileExplorer = () => {
       onDrop={handleDrop}
     >
       <div className="p-3 border-b border-border-light dark:border-border-dark space-y-3">
-        <h2 className="text-sm font-semibold text-text-primary-light dark:text-text-primary-dark">
-          Documents
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-text-primary-light dark:text-text-primary-dark">
+            Documents
+          </h2>
+          <button
+            onClick={async () => {
+              if (confirm('Are you sure you want to delete ALL documents and clear the index? This cannot be undone.')) {
+                try {
+                  const { clearAllDocuments } = await import('../services/api');
+                  const result = await clearAllDocuments();
+                  alert(`Successfully cleared ${result.deletedFiles} files and reset the index.`);
+                  // Clear frontend file system
+                  const { useFileSystemStore } = await import('../stores/fileSystemStore');
+                  useFileSystemStore.getState().files = [{
+                    id: 'welcome',
+                    name: 'Welcome.md',
+                    type: 'md',
+                    content: '# Welcome to AI Document Workspace\n\nStart by creating or importing documents from the sidebar.\n\n## Features\n- 📁 File management with drag & drop\n- 📝 Document editing (Markdown, PDF, DOCX)\n- 💬 AI chat assistant with document context\n- 🎨 Beautiful, responsive interface\n\nSelect a document to edit or chat with the AI assistant!',
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                  }];
+                  useFileSystemStore.getState().setActiveFile('welcome');
+                  window.location.reload(); // Reload to refresh everything
+                } catch (err) {
+                  alert(`Error clearing documents: ${err instanceof Error ? err.message : 'Unknown error'}`);
+                }
+              }
+            }}
+            className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors"
+            title="Clear all documents and index"
+          >
+            <Trash size={14} className="text-red-600 dark:text-red-400" />
+          </button>
+        </div>
         <FileUpload />
       </div>
       
-      <div className="py-2">
+      <div 
+        className="py-2"
+        onClick={(e) => {
+          // Allow clicking empty space to deselect
+          if (e.target === e.currentTarget) {
+            const { setActiveFile, activeFileId } = useFileSystemStore.getState();
+            if (activeFileId) {
+              setActiveFile(null);
+            }
+          }
+        }}
+      >
         {files.length === 0 ? (
           <div className="px-4 py-8 text-center text-text-muted-light dark:text-text-muted-dark text-sm">
             <p>No documents yet</p>
