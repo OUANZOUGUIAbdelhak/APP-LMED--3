@@ -19,6 +19,8 @@ interface FileSystemState {
   toggleFolder: (id: string) => void;
   moveFile: (fileId: string, newParentId?: string) => void;
   getFileById: (id: string) => FileNode | null;
+  findFileBySavedFilename: (savedFilename: string) => FileNode | null;
+  findFileByDocId: (docId: string) => FileNode | null;
   getFilePath: (id: string) => string;
 }
 
@@ -27,6 +29,19 @@ const findFileById = (files: FileNode[], id: string): FileNode | null => {
     if (file.id === id) return file;
     if (file.children) {
       const found = findFileById(file.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+};
+
+const findFileByPredicate = (files: FileNode[], predicate: (file: FileNode) => boolean): FileNode | null => {
+  for (const file of files) {
+    if (predicate(file)) {
+      return file;
+    }
+    if (file.children) {
+      const found = findFileByPredicate(file.children, predicate);
       if (found) return found;
     }
   }
@@ -185,6 +200,16 @@ export const useFileSystemStore = create<FileSystemState>()(
 
       getFileById: (id) => {
         return findFileById(get().files, id);
+      },
+
+      findFileBySavedFilename: (savedFilename) => {
+        if (!savedFilename) return null;
+        return findFileByPredicate(get().files, file => file.savedFilename === savedFilename);
+      },
+
+      findFileByDocId: (docId) => {
+        if (!docId) return null;
+        return findFileByPredicate(get().files, file => file.docId === docId);
       },
 
       getFilePath: (id) => {

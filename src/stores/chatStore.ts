@@ -11,7 +11,7 @@ interface ChatState {
   attachedFileId: string | null;
   
   // Actions
-  addMessage: (role: 'user' | 'assistant', content: string, attachedFile?: string, sources?: any[]) => void;
+  addMessage: (role: 'user' | 'assistant', content: string, attachedFile?: string, sources?: any[], usedGeneralKnowledge?: boolean) => void;
   setIsTyping: (isTyping: boolean) => void;
   setAttachedFile: (fileId: string | null) => void;
   clearMessages: () => void;
@@ -32,7 +32,7 @@ export const useChatStore = create<ChatState>()(
       isTyping: false,
       attachedFileId: null,
 
-      addMessage: (role, content, attachedFile, sources) => {
+      addMessage: (role, content, attachedFile, sources, usedGeneralKnowledge) => {
         const message: ChatMessage = {
           id: nanoid(),
           role,
@@ -40,6 +40,7 @@ export const useChatStore = create<ChatState>()(
           timestamp: new Date(),
           attachedFile,
           sources,
+          usedGeneralKnowledge,
         };
 
         set(state => ({
@@ -67,7 +68,7 @@ export const useChatStore = create<ChatState>()(
       },
 
       sendMessage: async (message, context, docId) => {
-        const { addMessage, setIsTyping, getFileById } = get();
+        const { addMessage, setIsTyping } = get();
         
         const attachedFileId = get().attachedFileId;
         const attachedFile = attachedFileId ? useFileSystemStore.getState().getFileById(attachedFileId) : null;
@@ -88,8 +89,8 @@ export const useChatStore = create<ChatState>()(
             documentIds: docId ? [docId] : undefined,
           });
           
-          // Add message with sources
-          addMessage('assistant', data.response, undefined, data.sources);
+          // Add message with sources and general knowledge flag
+          addMessage('assistant', data.response, undefined, data.sources, (data as any).usedGeneralKnowledge);
         } catch (error) {
           console.error('Chat error:', error);
           const msg = error instanceof Error ? error.message : 'Unknown error';

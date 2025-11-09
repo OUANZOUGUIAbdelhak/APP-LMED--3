@@ -44,15 +44,18 @@ export function FileUpload() {
       // Add to file system (for display purposes)
       // Store the actual saved filename from backend (with timestamp)
       const savedFilename = result?.filename || file.name;
-      const newId = addFile(file.name, getFileType(file.name), null, `[Uploaded file: ${file.name}]`);
+      const newId = addFile(file.name, getFileType(file.name), undefined, `[Uploaded file: ${file.name}]`);
       if (result?.id) {
         setFileMeta(newId, { docId: result.id, savedFilename });
       }
       
+      // Show warning if parsing failed but upload succeeded
+      const warningMessage = (result as any)?.warning;
+      
       setUploadStatus({
         loading: false,
         success: true,
-        error: null,
+        error: warningMessage || null,
         filename: file.name,
       });
 
@@ -93,11 +96,13 @@ export function FileUpload() {
     }
   };
 
-  const getFileType = (filename: string): 'text' | 'pdf' | 'image' | 'folder' => {
+  const getFileType = (filename: string): 'txt' | 'md' | 'pdf' | 'docx' | 'xlsx' | 'folder' => {
     const ext = filename.toLowerCase().split('.').pop();
     if (ext === 'pdf') return 'pdf';
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext || '')) return 'image';
-    return 'text';
+    if (ext === 'docx' || ext === 'doc') return 'docx';
+    if (ext === 'xlsx' || ext === 'xls') return 'xlsx';
+    if (ext === 'md') return 'md';
+    return 'txt';
   };
 
   const handleButtonClick = () => {
@@ -161,10 +166,13 @@ export function FileUpload() {
             {uploadStatus.loading && (
               <p>Uploading {uploadStatus.filename}...</p>
             )}
-            {uploadStatus.success && (
+            {uploadStatus.success && !uploadStatus.error && (
               <p>✅ {uploadStatus.filename} uploaded and indexed!</p>
             )}
-            {uploadStatus.error && (
+            {uploadStatus.success && uploadStatus.error && (
+              <p>⚠️ {uploadStatus.filename} uploaded but: {uploadStatus.error}</p>
+            )}
+            {!uploadStatus.success && uploadStatus.error && (
               <p>❌ {uploadStatus.error}</p>
             )}
           </div>

@@ -53,8 +53,13 @@ export interface ChatResponse {
   timestamp: string;
   sources?: {
     filename: string;
+    docId?: string;
     score: number;
     text_preview: string;
+    page?: number | null;
+    sheet?: string | null;
+    lineStart?: number;
+    lineEnd?: number;
   }[];
 }
 
@@ -105,7 +110,7 @@ export async function sendAgentMessage(
  * Upload a document to the backend for processing
  * Useful for RAG implementations
  */
-export async function uploadDocument(file: File): Promise<{ id: string; status: string }> {
+export async function uploadDocument(file: File): Promise<{ id: string; status: string; filename?: string }> {
   const formData = new FormData();
   formData.append('file', file);
 

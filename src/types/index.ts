@@ -1,4 +1,4 @@
-export type FileType = 'pdf' | 'docx' | 'md' | 'txt' | 'folder';
+export type FileType = 'pdf' | 'docx' | 'md' | 'txt' | 'xlsx' | 'folder';
 
 export interface FileNode {
   id: string;
@@ -21,9 +21,15 @@ export interface ChatMessage {
   attachedFile?: string;
   sources?: {
     filename: string;
+    docId?: string;
     score: number;
     text_preview: string;
+    page?: number | null;
+    sheet?: string | null;
+    lineStart?: number;
+    lineEnd?: number;
   }[];
+  usedGeneralKnowledge?: boolean;
 }
 
 export interface AppState {

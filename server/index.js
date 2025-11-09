@@ -11,6 +11,7 @@ import { parseUploadedFile, parseTextDirect } from './lib/parser.js';
 import { VectorStore } from './lib/vectorStore.js';
 import { MemoryStore } from './lib/memory.js';
 import { runAgentLoop } from './lib/agent.js';
+import htmlDocx from 'html-docx-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,9 @@ const DATA_DIR = path.join(__dirname, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+// Serve uploaded files
+app.use('/uploads', express.static(UPLOAD_DIR));
+
 // Init services
 const vectorStore = new VectorStore(path.join(DATA_DIR, 'index.json'));
 const memoryStore = new MemoryStore();
@@ -35,7 +39,14 @@ const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
-const upload = multer({ storage });
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  fileFilter: (_req, file, cb) => {
+    // Accept all file types for now
+    cb(null, true);
+  }
+});
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -110,32 +121,55 @@ app.post('/api/session/reset', (req, res) => {
 
 app.post('/api/documents/upload', upload.single('file'), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
     
     console.log(`📄 Processing upload: ${req.file.originalname}`);
+    console.log(`   MIME type: ${req.file.mimetype}`);
     console.log(`   Saved as: ${req.file.filename}`);
     console.log(`   Path: ${req.file.path}`);
     console.log(`   Size: ${req.file.size} bytes`);
     
-    const parsed = await parseUploadedFile(req.file.path, req.file.originalname);
-    
-    console.log(`   Extracted ${parsed.segments.length} segments`);
-    
-    const docId = uuidv4();
-    // Use the actual saved filename (with timestamp) for indexing
-    const savedFilename = req.file.filename;
-    await vectorStore.indexDocument({
-      id: docId,
-      filename: savedFilename,
-      segments: parsed.segments.map(seg => ({ ...seg, filename: savedFilename }))
-    });
-    
-    console.log(`✅ Indexed document: ${savedFilename} (${docId})`);
-    
-    res.json({ id: docId, status: 'indexed', filename: savedFilename });
+    try {
+      const parsed = await parseUploadedFile(req.file.path, req.file.originalname);
+      
+      console.log(`   Extracted ${parsed.segments.length} segments`);
+      
+      const docId = uuidv4();
+      // Use the actual saved filename (with timestamp) for indexing
+      const savedFilename = req.file.filename;
+      await vectorStore.indexDocument({
+        id: docId,
+        filename: savedFilename,
+        segments: parsed.segments.map(seg => ({ ...seg, filename: savedFilename }))
+      });
+      
+      console.log(`✅ Indexed document: ${savedFilename} (${docId})`);
+      
+      res.json({ id: docId, status: 'indexed', filename: savedFilename });
+    } catch (parseError) {
+      console.error('Parse error:', parseError);
+      // Even if parsing fails, still save the file reference
+      const docId = uuidv4();
+      const savedFilename = req.file.filename;
+      console.log(`⚠️  Parse failed but file saved: ${savedFilename} (${docId})`);
+      res.json({ 
+        id: docId, 
+        status: 'uploaded', 
+        filename: savedFilename,
+        warning: `File uploaded but parsing failed: ${parseError.message}`
+      });
+    }
   } catch (err) {
     console.error('Upload error:', err);
     console.error('Stack:', err.stack);
+    
+    // Handle multer errors specifically
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'File too large', details: 'Maximum file size is 50MB' });
+    }
+    
     res.status(500).json({ error: 'Failed to process file', details: err.message });
   }
 });
@@ -172,6 +206,31 @@ app.post('/api/documents/index-batch', async (req, res) => {
   }
 });
 
+app.post('/api/documents/export-docx', (req, res) => {
+  try {
+    const { html, fileName } = req.body || {};
+    if (typeof html !== 'string' || !html.trim()) {
+      return res.status(400).json({ error: 'html content is required' });
+    }
+
+    const requestedName = typeof fileName === 'string' && fileName.trim().length > 0
+      ? fileName.trim()
+      : 'document.docx';
+    const ensuredName = requestedName.toLowerCase().endsWith('.docx') ? requestedName : `${requestedName}.docx`;
+    const safeFileName = ensuredName.replace(/[^a-zA-Z0-9_.-]/g, '_');
+
+    const base64Doc = htmlDocx.asBase64(html);
+    const buffer = Buffer.from(base64Doc, 'base64');
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"`);
+    res.send(buffer);
+  } catch (err) {
+    console.error('DOCX export error:', err);
+    res.status(500).json({ error: 'Failed to export DOCX' });
+  }
+});
+
 app.get('/api/documents/search', async (req, res) => {
   try {
     const query = String(req.query.query || '');
@@ -181,8 +240,10 @@ app.get('/api/documents/search', async (req, res) => {
     res.json({ results: results.map(r => ({
       filename: r.filename,
       score: r.score,
+      docId: r.docId,
       text: r.text,
       page: r.page || null,
+      sheet: r.sheet || null,
       lineStart: r.lineStart,
       lineEnd: r.lineEnd
     })) });
@@ -219,9 +280,11 @@ app.post('/api/rag/query', async (req, res) => {
       timestamp: new Date().toISOString(),
       sources: retrieved.map(r => ({
         filename: r.filename,
+        docId: r.docId,
         score: r.score,
         text_preview: r.text.slice(0, 320) + (r.text.length > 320 ? '…' : ''),
         page: r.page || null,
+        sheet: r.sheet || null,
         lineStart: r.lineStart,
         lineEnd: r.lineEnd
       }))
@@ -283,8 +346,43 @@ app.post('/api/agent/chat', async (req, res) => {
       useRag = true;
     }
 
-    // Retrieve RAG sources if needed
-    const retrieved = useRag ? await vectorStore.search(message, 5, restrictDocIds) : [];
+    // If no specific document context, search all documents for relevant content
+    let retrieved = [];
+    let hasRelevantDocs = true;
+    
+    if (!useRag) {
+      // Search across all documents in the vector store
+      const allDocsSearch = await vectorStore.search(message, 10); // Get more results
+      
+      console.log(`🔍 Search results for "${message}":`, allDocsSearch.map(r => ({
+        filename: r.filename,
+        score: r.score.toFixed(3),
+        preview: r.text.slice(0, 100)
+      })));
+      
+      // Use a lower threshold - even weak matches can be helpful
+      // Also ensure we have at least some results if any exist
+      const relevantDocs = allDocsSearch.filter(r => r.score > 0.3);
+      
+      if (relevantDocs.length > 0) {
+        retrieved = relevantDocs.slice(0, 5); // Take top 5
+        useRag = true;
+        console.log(`📚 Found ${relevantDocs.length} relevant documents (using top ${retrieved.length})`);
+      } else if (allDocsSearch.length > 0) {
+        // Even if scores are low, use the best matches we have
+        retrieved = allDocsSearch.slice(0, 3);
+        useRag = true;
+        console.log(`📚 Using ${retrieved.length} best matches (low scores but available)`);
+      } else {
+        // No documents found at all
+        hasRelevantDocs = false;
+        console.log(`💭 No documents found in vector store. Total documents: ${vectorStore.countDocuments()}`);
+      }
+    } else {
+      // Retrieve RAG sources with document restriction
+      retrieved = await vectorStore.search(message, 5, restrictDocIds);
+      console.log(`📚 Retrieved ${retrieved.length} documents from restricted set`);
+    }
 
     // Determine active document filename from retrieved sources or inline document
     let activeDocumentName = null;
@@ -307,7 +405,8 @@ app.post('/api/agent/chat', async (req, res) => {
       apiKey: process.env.GROQ_API_KEY,
       model: process.env.GROQ_MODEL || 'llama-3.1-70b-versatile',
       uploadsDir: UPLOAD_DIR,
-      activeDocument: activeDocumentName
+      activeDocument: activeDocumentName,
+      hasRelevantDocs
     });
 
     if (sessionId) memoryStore.append(sessionId, { role: 'user', content: message }, { role: 'assistant', content: answer });
@@ -317,13 +416,16 @@ app.post('/api/agent/chat', async (req, res) => {
       timestamp: new Date().toISOString(),
       sources: retrieved.map(r => ({
         filename: r.filename,
+        docId: r.docId,
         score: r.score,
         text_preview: r.text.slice(0, 320) + (r.text.length > 320 ? '…' : ''),
         page: r.page || null,
+        sheet: r.sheet || null,
         lineStart: r.lineStart,
         lineEnd: r.lineEnd
       })),
-      toolCalls: toolCalls || []
+      toolCalls: toolCalls || [],
+      usedGeneralKnowledge: !hasRelevantDocs
     });
   } catch (err) {
     console.error('Agent chat error:', err);

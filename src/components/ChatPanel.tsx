@@ -9,9 +9,40 @@ import { ChatMessage } from '../types';
 
 const MessageBubble = ({ message }: { message: ChatMessage }) => {
   const isUser = message.role === 'user';
-  const { getFileById } = useFileSystemStore();
+  const { 
+    getFileById, 
+    findFileByDocId, 
+    findFileBySavedFilename, 
+    setActiveFile 
+  } = useFileSystemStore(state => ({
+    getFileById: state.getFileById,
+    findFileByDocId: state.findFileByDocId,
+    findFileBySavedFilename: state.findFileBySavedFilename,
+    setActiveFile: state.setActiveFile,
+  }));
   
   const attachedFile = message.attachedFile ? getFileById(message.attachedFile) : null;
+
+  const resolveSourceFile = (source: NonNullable<ChatMessage['sources']>[number]) => {
+    if (source.docId) {
+      const byDoc = findFileByDocId(source.docId);
+      if (byDoc) return byDoc;
+    }
+    if (source.filename) {
+      const bySaved = findFileBySavedFilename(source.filename);
+      if (bySaved) return bySaved;
+    }
+    return null;
+  };
+
+  const handleSourceClick = (source: NonNullable<ChatMessage['sources']>[number]) => {
+    const file = resolveSourceFile(source);
+    if (file) {
+      setActiveFile(file.id);
+    } else {
+      console.warn(`Referenced document not found locally for`, source);
+    }
+  };
 
   return (
     <div className={`flex gap-3 mb-4 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
@@ -40,6 +71,21 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
             <ReactMarkdown>{message.content}</ReactMarkdown>
           </div>
 
+          {/* General Knowledge Indicator */}
+          {message.usedGeneralKnowledge && (
+            <div className="mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
+              <div className="text-xs bg-purple-50 dark:bg-purple-900/20 rounded-lg p-2 border border-purple-200 dark:border-purple-800">
+                <p className="text-purple-700 dark:text-purple-300 font-medium flex items-center gap-1">
+                  <span>🌐</span>
+                  General Knowledge Response
+                </p>
+                <p className="text-purple-600 dark:text-purple-400 mt-1 text-[10px]">
+                  No relevant documents found in workspace. Answer provided from general knowledge.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Source Citations - RAG Feature */}
           {message.sources && message.sources.length > 0 && (
             <div className="mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
@@ -50,17 +96,34 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
               {message.sources.map((source, idx) => (
                 <div 
                   key={idx}
-                  className="text-xs bg-blue-50 dark:bg-blue-900/20 rounded-lg p-2 mb-2 last:mb-0 border border-blue-200 dark:border-blue-800"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => handleSourceClick(source)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      handleSourceClick(source);
+                    }
+                  }}
+                  className="text-xs bg-blue-50 dark:bg-blue-900/20 rounded-lg p-2 mb-2 last:mb-0 border border-blue-200 dark:border-blue-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-400 dark:focus:ring-blue-600 transition-transform hover:-translate-y-0.5"
+                  title="Open this document in the reviewer panel"
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-medium text-blue-700 dark:text-blue-300 flex items-center gap-1">
                       <FileText size={10} />
-                      {source.filename}
+                      {resolveSourceFile(source)?.name || source.filename}
+                      {source.page && <span className="text-[9px]">(p. {source.page})</span>}
+                      {source.sheet && <span className="text-[9px]">(sheet: {source.sheet})</span>}
                     </span>
                     <span className="text-gray-600 dark:text-gray-400 text-[10px]">
                       {Math.round(source.score * 100)}% match
                     </span>
                   </div>
+                  {(source.lineStart || source.lineEnd) && (
+                    <p className="text-[9px] text-gray-500 dark:text-gray-400 mb-1">
+                      Lines {source.lineStart}-{source.lineEnd}
+                    </p>
+                  )}
                   <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
                     {source.text_preview}
                   </p>

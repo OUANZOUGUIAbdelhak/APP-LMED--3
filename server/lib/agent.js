@@ -11,12 +11,13 @@ import { toolSpecs, executeTool } from './tools/index.js';
  * @param {string} options.model - Groq model
  * @param {string} options.uploadsDir - Workspace directory path
  * @param {string} options.activeDocument - Currently selected/attached document filename
+ * @param {boolean} options.hasRelevantDocs - Whether relevant docs were found
  * @returns {Promise<{response: string, toolCalls: Array}>}
  */
-export async function runAgentLoop({ message, history = [], retrieved = [], apiKey, model, uploadsDir, activeDocument }) {
+export async function runAgentLoop({ message, history = [], retrieved = [], apiKey, model, uploadsDir, activeDocument, hasRelevantDocs = true }) {
   const groq = new Groq({ apiKey });
 
-  const systemPrompt = buildSystemPrompt(retrieved, activeDocument);
+  const systemPrompt = buildSystemPrompt(retrieved, activeDocument, hasRelevantDocs);
   const messages = [
     { role: 'system', content: systemPrompt },
     ...history.slice(-6),
@@ -35,7 +36,7 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
     try {
       completion = await groq.chat.completions.create({
         model,
-        temperature: 0.2,
+        temperature: hasRelevantDocs ? 0.2 : 0.5, // Higher temperature for general knowledge
         max_tokens: 1200,
         messages: currentMessages,
         tools: enableTools && toolSpecs.length > 0 ? toolSpecs : undefined,
@@ -89,14 +90,14 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
   };
 }
 
-function buildSystemPrompt(retrieved, activeDocument) {
+function buildSystemPrompt(retrieved, activeDocument, hasRelevantDocs) {
   let baseInstructions = `You are a helpful AI assistant with access to a document workspace.
 
 **Workspace**: All user documents are in a dedicated uploads directory. Use relative paths (e.g., "document.pdf", "folder/file.txt") when calling tools.
 
 **Available Tools**:
 - \`list_dir\`: List files/folders in workspace (use "." for root)
-- \`extract_document\`: Extract full text from a document (PDF, DOCX, TXT)
+- \`extract_document\`: Extract full text from a document (PDF, DOCX, TXT, XLSX)
 - \`read_file\`: Read specific lines from a text file
 - \`grep_files\`: Search for content across files`;
 
@@ -106,12 +107,17 @@ When the user says "this document" or "the document", they are referring to "${a
 Use \`extract_document\` with filename="${activeDocument}" to read its content.`;
   }
 
-  baseInstructions += `\n\n**Workflow for "tell me about this document" questions**:
+  baseInstructions += `\n\n**Workflow for questions**:
 1. If a specific document is mentioned or active, use \`extract_document\` with that filename
-2. Analyze and summarize the content with key points
-3. Cite sources with filename and line/page references
+2. If no document is specified, use \`grep_files\` to search across all documents in the workspace
+3. Analyze content and provide detailed answers with source citations
+4. Always cite sources with filename and line/page references like [filename lines X-Y]
 
-**When citing sources**: Include filename and line/page references like [filename lines X-Y].`;
+**Important**: If the user asks a question and no relevant information is found in the documents after searching, provide a helpful general answer based on your knowledge and clearly state that this information is not from the documents.`;
+
+  if (retrieved.length === 0 && !hasRelevantDocs) {
+    return baseInstructions + `\n\n**NOTE**: No relevant documents were found in the workspace for this query. You should answer the question using your general knowledge while being helpful and accurate. Clearly mention that the answer is not based on the workspace documents.`;
+  }
 
   if (retrieved.length === 0) {
     return baseInstructions;
@@ -119,20 +125,26 @@ Use \`extract_document\` with filename="${activeDocument}" to read its content.`
 
   const sourcesSection = retrieved
     .map((r, i) => {
-      const cite = `${r.filename}${r.page ? ` p${r.page}` : ''} lines ${r.lineStart}-${r.lineEnd}`;
+      const cite = `${r.filename}${r.page ? ` p${r.page}` : ''}${r.sheet ? ` sheet:${r.sheet}` : ''} lines ${r.lineStart}-${r.lineEnd}`;
       return `SOURCE ${i + 1} [${cite}]:\n${r.text}`;
     })
     .join('\n\n');
 
   const documentName = retrieved[0]?.filename || activeDocument || 'the document';
+  const uniqueDocs = [...new Set(retrieved.map(r => r.filename))];
 
   return `${baseInstructions}
 
-**CRITICAL**: The user is asking about "${documentName}". The following sources are ALREADY extracted from this document.
-DO NOT use \`extract_document\` or \`list_dir\` - the content is already provided below.
-Answer ONLY using these sources and cite them appropriately.
+**CRITICAL**: The user is asking about content that may be in the workspace documents. The following sources have been retrieved from ${uniqueDocs.length} document(s) in the workspace.
+DO NOT use \`extract_document\` or \`list_dir\` - the relevant content is already provided below.
+Answer the question using ONLY these retrieved sources. If the answer can be found in these sources, use them and cite appropriately. If the answer is not in these sources, say so clearly.
 
-**Retrieved Chunks from "${documentName}"**:
-${sourcesSection}`;
+**Retrieved Content from Workspace Documents**:
+${sourcesSection}
+
+**Instructions**: 
+- If the user's question can be answered using the sources above, provide a detailed answer with citations
+- Cite sources using format: [filename${retrieved[0]?.sheet ? ' sheet:SheetName' : ''} lines X-Y]
+- If the answer is NOT in the provided sources, clearly state: "Based on the documents in your workspace, I could not find information about [topic]. [Provide general knowledge answer if helpful]."`;
 }
 

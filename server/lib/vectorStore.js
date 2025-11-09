@@ -64,6 +64,8 @@ export class VectorStore {
         filename,
         text: seg.text,
         page: seg.page || null,
+        sheet: seg.sheet || null,
+        sheetIndex: typeof seg.sheetIndex === 'number' ? seg.sheetIndex : null,
         lineStart: seg.lineStart,
         lineEnd: seg.lineEnd,
         embedding
