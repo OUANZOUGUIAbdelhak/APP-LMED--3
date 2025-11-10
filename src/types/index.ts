@@ -1,4 +1,10 @@
-export type FileType = 'pdf' | 'docx' | 'md' | 'txt' | 'xlsx' | 'folder';
+export type FileType = 'pdf' | 'docx' | 'md' | 'txt' | 'xlsx' | 'tex' | 'folder';
+
+export interface FileVersion {
+  content: string;
+  timestamp: Date;
+  reason?: string; // e.g., "User edit", "AI insertion", etc.
+}
 
 export interface FileNode {
   id: string;
@@ -11,6 +17,7 @@ export interface FileNode {
   parentId?: string;
   createdAt: Date;
   updatedAt: Date;
+  versions?: FileVersion[]; // History of file versions (last 10)
 }
 
 export interface ChatMessage {

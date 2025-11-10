@@ -6,6 +6,7 @@ import { useFileSystemStore } from '../stores/fileSystemStore';
 import ReactMarkdown from 'react-markdown';
 import { formatDate } from '../lib/fileUtils';
 import { ChatMessage } from '../types';
+import { InsertSuggestion } from './InsertSuggestion';
 
 const MessageBubble = ({ message }: { message: ChatMessage }) => {
   const isUser = message.role === 'user';
@@ -13,15 +14,57 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
     getFileById, 
     findFileByDocId, 
     findFileBySavedFilename, 
-    setActiveFile 
+    setActiveFile,
+    activeFileId
   } = useFileSystemStore(state => ({
     getFileById: state.getFileById,
     findFileByDocId: state.findFileByDocId,
     findFileBySavedFilename: state.findFileBySavedFilename,
     setActiveFile: state.setActiveFile,
+    activeFileId: state.activeFileId,
   }));
   
   const attachedFile = message.attachedFile ? getFileById(message.attachedFile) : null;
+  const activeFile = activeFileId ? getFileById(activeFileId) : null;
+
+  // Detect insertion suggestions in assistant messages
+  // Look for code blocks, especially LaTeX, and phrases like "insert", "add", "would you like me to insert"
+  const detectInsertionSuggestions = () => {
+    if (isUser || !message.content) return null;
+    
+    const content = message.content.toLowerCase();
+    const hasInsertionPhrase = 
+      content.includes('would you like me to insert') ||
+      content.includes('insert this') ||
+      content.includes('add this') ||
+      content.includes('apply this') ||
+      content.includes('use this');
+    
+    if (!hasInsertionPhrase) return null;
+
+    // Extract code blocks from markdown
+    const codeBlockRegex = /```(?:latex|tex)?\n?([\s\S]*?)```/g;
+    const matches = Array.from(message.content.matchAll(codeBlockRegex));
+    
+    if (matches.length > 0) {
+      // Get the last code block (most likely the suggestion)
+      const lastMatch = matches[matches.length - 1];
+      const suggestedText = lastMatch[1].trim();
+      
+      // Determine target file
+      const targetFile = activeFile?.savedFilename || activeFile?.name;
+      
+      return {
+        text: suggestedText,
+        targetFile,
+        line: undefined, // Will insert at end or let user specify
+      };
+    }
+    
+    return null;
+  };
+
+  const insertionSuggestion = detectInsertionSuggestions();
 
   const resolveSourceFile = (source: NonNullable<ChatMessage['sources']>[number]) => {
     if (source.docId) {
@@ -84,6 +127,19 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
                 </p>
               </div>
             </div>
+          )}
+
+          {/* Insertion Suggestion */}
+          {insertionSuggestion && !isUser && (
+            <InsertSuggestion
+              suggestedText={insertionSuggestion.text}
+              targetFile={insertionSuggestion.targetFile}
+              line={insertionSuggestion.line}
+              onInserted={() => {
+                // Optionally refresh the file or show success message
+                console.log('Text inserted successfully');
+              }}
+            />
           )}
 
           {/* Source Citations - RAG Feature */}

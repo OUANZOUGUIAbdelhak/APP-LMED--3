@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { nanoid } from 'nanoid';
-import { FileNode, FileType } from '../types';
+import { FileNode, FileType, FileVersion } from '../types';
 // RAG disabled: no auto-indexing
 
 interface FileSystemState {
@@ -156,10 +156,28 @@ export const useFileSystemStore = create<FileSystemState>()(
         }));
       },
 
-      updateFileContent: (id, content) => {
-        set(state => ({
-          files: updateFileById(state.files, id, { content }),
-        }));
+      updateFileContent: (id, content, reason?: string) => {
+        set(state => {
+          const file = findFileById(state.files, id);
+          if (!file) return state;
+
+          // Create version history (keep last 10 versions)
+          const versions = file.versions || [];
+          const newVersion: FileVersion = {
+            content: file.content || '',
+            timestamp: new Date(),
+            reason: reason || 'User edit',
+          };
+          
+          const updatedVersions = [newVersion, ...versions].slice(0, 10);
+
+          return {
+            files: updateFileById(state.files, id, { 
+              content,
+              versions: updatedVersions,
+            }),
+          };
+        });
       },
 
       setFileMeta: (id, updates) => {

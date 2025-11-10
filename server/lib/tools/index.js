@@ -2,12 +2,14 @@ import { readFile, readFileToolSpec } from './readFile.js';
 import { listDir, listDirToolSpec } from './listDir.js';
 import { grepFiles, grepFilesToolSpec } from './grepFiles.js';
 import { extractDocument, extractDocumentToolSpec } from './extractDocument.js';
+import { insertText, insertTextToolSpec } from './insertText.js';
 
 export const toolHandlers = {
   read_file: readFile,
   list_dir: listDir,
   grep_files: grepFiles,
   extract_document: extractDocument,
+  insert_text: insertText,
 };
 
 export const toolSpecs = [
@@ -15,6 +17,7 @@ export const toolSpecs = [
   listDirToolSpec,
   grepFilesToolSpec,
   extractDocumentToolSpec,
+  insertTextToolSpec,
 ];
 
 /**

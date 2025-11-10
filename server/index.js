@@ -544,6 +544,72 @@ app.post('/api/agent/chat', async (req, res) => {
   }
 });
 
+app.post('/api/documents/insert-text', async (req, res) => {
+  try {
+    const { filename, text, line, column = 1 } = req.body || {};
+    
+    if (!filename) {
+      return res.status(400).json({ error: 'filename is required' });
+    }
+    if (text === undefined || text === null) {
+      return res.status(400).json({ error: 'text is required' });
+    }
+    if (typeof line !== 'number' || line < 1) {
+      return res.status(400).json({ error: 'line must be a positive number' });
+    }
+
+    // Security: prevent path traversal
+    const safeName = path.basename(filename);
+    const filePath = path.join(UPLOAD_DIR, safeName);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: `File not found: ${safeName}` });
+    }
+
+    // Read current content
+    const content = fs.readFileSync(filePath, 'utf8');
+    const lines = content.split(/\r?\n/);
+
+    // Validate line number
+    if (line > lines.length + 1) {
+      return res.status(400).json({ 
+        error: `Line ${line} is beyond the end of the file (file has ${lines.length} lines)` 
+      });
+    }
+
+    // Insert text
+    const insertLine = line - 1; // Convert to 0-based index
+    const insertColumn = Math.max(0, column - 1); // Convert to 0-based index
+
+    if (insertLine === lines.length) {
+      // Append at end of file
+      lines.push(text);
+    } else if (insertColumn === 0) {
+      // Insert as new line before the specified line
+      lines.splice(insertLine, 0, text);
+    } else {
+      // Insert at specific column in existing line
+      const currentLine = lines[insertLine];
+      const before = currentLine.slice(0, insertColumn);
+      const after = currentLine.slice(insertColumn);
+      lines[insertLine] = before + text + after;
+    }
+
+    // Write back
+    const newContent = lines.join('\n');
+    fs.writeFileSync(filePath, newContent, 'utf8');
+
+    res.json({ 
+      success: true, 
+      message: `Successfully inserted text into ${safeName} at line ${line}, column ${column}`,
+      filename: safeName
+    });
+  } catch (err) {
+    console.error('Insert text error:', err);
+    res.status(500).json({ error: `Failed to insert text: ${err.message}` });
+  }
+});
+
 app.listen(port, () => {
   console.log(`API server listening on http://localhost:${port}`);
 });

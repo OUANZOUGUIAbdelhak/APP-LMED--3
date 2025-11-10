@@ -198,3 +198,33 @@ export async function queryRAG(query: string, documentIds?: string[]): Promise<C
   }
 }
 
+/**
+ * Insert text into a file at a specific line/column
+ */
+export async function insertTextIntoFile(
+  filename: string,
+  text: string,
+  line: number,
+  column: number = 1
+): Promise<{ success: boolean; message: string; filename: string }> {
+  try {
+    const response = await fetch(`${API_BASE_URL}/documents/insert-text`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ filename, text, line, column }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }));
+      throw new Error(errorData.error || `Insert text error: ${response.statusText}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Insert text error:', error);
+    throw error;
+  }
+}
+

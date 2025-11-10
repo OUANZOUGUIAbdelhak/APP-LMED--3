@@ -108,9 +108,10 @@ function buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs) 
 
 **Available Tools**:
 - list_dir: List files and folders in the workspace
-- extract_document: Extract full text from a document (PDF, DOCX, TXT, XLSX)
+- extract_document: Extract full text from a document (PDF, DOCX, TXT, XLSX, TEX)
 - read_file: Read specific lines from a text file
-- grep_files: Search for content across files`;
+- grep_files: Search for content across files
+- insert_text: Insert text into a file at a specific line/column position (use when user approves a suggestion)`;
 
   if (activeDocument) {
     baseInstructions += `\n\n**IMPORTANT**: The user is currently viewing/asking about the document: "${activeDocument}"
@@ -124,6 +125,18 @@ Use extract_document tool with that filename to read its content.`;
 3. If no document is specified and it's not a workspace listing question, use grep_files to search across all documents
 4. For content questions, analyze and provide detailed answers with source citations
 5. Always cite sources with filename and line/page references like [filename lines X-Y] (but NOT for workspace listing questions)
+
+**LaTeX File Support**:
+- When working with .tex files, understand LaTeX syntax, commands, environments, and structure
+- For review requests (e.g., "Review my abstract"), read the relevant section and provide feedback on clarity, structure, grammar, and LaTeX formatting
+- When proposing edits, provide corrected LaTeX code blocks that maintain proper syntax
+- Use insert_text tool only when the user explicitly approves a suggestion (e.g., "yes, insert that" or "apply the changes")
+
+**Cross-Document Reasoning**:
+- When asked to synthesize information from multiple documents (e.g., "Based on document X and Y, what is the best conclusion?"), use extract_document or grep_files to read all referenced documents
+- Analyze and synthesize information from multiple sources before providing answers
+- When proposing text for insertion (like conclusions or summaries), clearly indicate which documents were used as sources
+- Ask for confirmation before inserting synthesized text: "Would you like me to insert this text into your article?"
 
 **Important**: If the user asks a question and no relevant information is found in the documents after searching, provide a helpful general answer based on your knowledge and clearly state that this information is not from the documents.`;
 

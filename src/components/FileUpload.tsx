@@ -96,12 +96,13 @@ export function FileUpload() {
     }
   };
 
-  const getFileType = (filename: string): 'txt' | 'md' | 'pdf' | 'docx' | 'xlsx' | 'folder' => {
+  const getFileType = (filename: string): 'txt' | 'md' | 'pdf' | 'docx' | 'xlsx' | 'tex' | 'folder' => {
     const ext = filename.toLowerCase().split('.').pop();
     if (ext === 'pdf') return 'pdf';
     if (ext === 'docx' || ext === 'doc') return 'docx';
     if (ext === 'xlsx' || ext === 'xls') return 'xlsx';
     if (ext === 'md') return 'md';
+    if (ext === 'tex') return 'tex';
     return 'txt';
   };
 
@@ -114,7 +115,7 @@ export function FileUpload() {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.docx,.doc,.txt,.md,.xlsx,.xls,.pptx,.ppt,.csv,.json"
+        accept=".pdf,.docx,.doc,.txt,.md,.xlsx,.xls,.pptx,.ppt,.csv,.json,.tex"
         onChange={handleFileSelect}
         className="hidden"
       />

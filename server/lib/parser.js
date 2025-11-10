@@ -77,6 +77,16 @@ async function parseTxt(filePath, originalName) {
   return { text, segments };
 }
 
+async function parseTex(filePath, originalName) {
+  // LaTeX files are text files, but we preserve the structure better
+  const text = fs.readFileSync(filePath, 'utf8');
+  const lines = splitIntoLines(text);
+  // For LaTeX, we want to preserve sections, environments, etc.
+  // Use slightly larger chunks to keep LaTeX structures together
+  const segments = chunkLines(lines, 1000, 3).map(seg => ({ ...seg, page: null, filename: originalName }));
+  return { text, segments };
+}
+
 async function parseXlsx(filePath, originalName) {
   try {
     // Check if file exists
@@ -182,12 +192,17 @@ export async function parseUploadedFile(filePath, originalName) {
   if (ext === '.pdf' || mimeType === 'application/pdf') return parsePdf(filePath, originalName);
   if (ext === '.docx' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return parseDocx(filePath, originalName);
   if (ext === '.xlsx' || ext === '.xls' || mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || mimeType === 'application/vnd.ms-excel') return parseXlsx(filePath, originalName);
+  if (ext === '.tex' || mimeType === 'application/x-tex' || mimeType === 'text/x-tex') return parseTex(filePath, originalName);
   return parseTxt(filePath, originalName);
 }
 
 export async function parseTextDirect(content, originalName = 'inline.txt') {
   const lines = splitIntoLines(content || '');
-  const segments = chunkLines(lines).map(seg => ({ ...seg, page: null, filename: originalName }));
+  // Detect LaTeX files and use larger chunks
+  const isLaTeX = originalName.toLowerCase().endsWith('.tex');
+  const chunkSize = isLaTeX ? 1000 : 800;
+  const overlap = isLaTeX ? 3 : 2;
+  const segments = chunkLines(lines, chunkSize, overlap).map(seg => ({ ...seg, page: null, filename: originalName }));
   return { text: content, segments };
 }
 

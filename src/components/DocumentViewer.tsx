@@ -11,6 +11,7 @@ import Spreadsheet, { type CellBase, type Matrix } from 'react-spreadsheet';
 import ReactQuill from 'react-quill';
 import 'react-quill/dist/quill.snow.css';
 import { saveAs } from 'file-saver';
+import { LaTeXEditor } from './LaTeXEditor';
 
 type SpreadsheetCell = CellBase<string>;
 type SpreadsheetMatrix = Matrix<SpreadsheetCell>;
@@ -975,6 +976,14 @@ export const DocumentViewer = () => {
         <XlsxViewer 
           filePath={fileUrl}
           initialContent={activeFile.content}
+          fileName={activeFile.name}
+          onChange={handleContentChange}
+        />
+      )}
+      
+      {activeFile.type === 'tex' && (
+        <LaTeXEditor 
+          content={activeFile.content || ''}
           fileName={activeFile.name}
           onChange={handleContentChange}
         />
