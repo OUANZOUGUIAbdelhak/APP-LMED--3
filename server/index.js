@@ -559,7 +559,7 @@ app.post('/api/agent/chat', async (req, res) => {
 
     // Run agent loop with tools + RAG
     // Pass information about mentioned documents to help agent find them
-    const { response: answer, toolCalls } = await runAgentLoop({
+    const { response: answer, toolCalls, createdFiles } = await runAgentLoop({
       message,
       history,
       retrieved,
@@ -568,7 +568,8 @@ app.post('/api/agent/chat', async (req, res) => {
       uploadsDir: UPLOAD_DIR,
       activeDocument: activeDocumentName,
       hasRelevantDocs,
-      mentionedDocuments: mentionedDocuments.length > 0 ? mentionedDocuments : undefined
+      mentionedDocuments: mentionedDocuments.length > 0 ? mentionedDocuments : undefined,
+      vectorStore: vectorStore
     });
 
     if (sessionId) memoryStore.append(sessionId, { role: 'user', content: message }, { role: 'assistant', content: answer });
@@ -591,6 +592,7 @@ app.post('/api/agent/chat', async (req, res) => {
         lineEnd: r.lineEnd
       })) : [],
       toolCalls: toolCalls || [],
+      createdFiles: createdFiles || [],
       usedGeneralKnowledge: shouldMarkAsGeneralKnowledge
     });
   } catch (err) {

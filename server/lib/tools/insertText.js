@@ -68,7 +68,7 @@ export const insertTextToolSpec = {
   type: 'function',
   function: {
     name: 'insert_text',
-    description: 'Insert text into a file at a specific line and column position. Use this when the user approves a suggestion to insert text into their LaTeX or other text file.',
+    description: 'Insert text into a file at a specific line and column position. Use this when the user approves a suggestion OR when automatically populating a newly created LaTeX file with content. Always read the file first using read_file to find the exact line numbers before inserting.',
     parameters: {
       type: 'object',
       properties: {

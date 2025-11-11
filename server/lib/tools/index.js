@@ -3,6 +3,7 @@ import { listDir, listDirToolSpec } from './listDir.js';
 import { grepFiles, grepFilesToolSpec } from './grepFiles.js';
 import { extractDocument, extractDocumentToolSpec } from './extractDocument.js';
 import { insertText, insertTextToolSpec } from './insertText.js';
+import { createLatexFile, createLatexFileToolSpec } from './createLatexFile.js';
 
 export const toolHandlers = {
   read_file: readFile,
@@ -10,6 +11,7 @@ export const toolHandlers = {
   grep_files: grepFiles,
   extract_document: extractDocument,
   insert_text: insertText,
+  create_latex_file: createLatexFile,
 };
 
 export const toolSpecs = [
@@ -18,6 +20,7 @@ export const toolSpecs = [
   grepFilesToolSpec,
   extractDocumentToolSpec,
   insertTextToolSpec,
+  createLatexFileToolSpec,
 ];
 
 /**

@@ -23,11 +23,6 @@ export const InsertSuggestion = ({
   const { findFileBySavedFilename, getFileById, activeFileId, updateFileContent } = useFileSystemStore();
 
   const handleInsert = async () => {
-    if (!targetFile && !activeFileId) {
-      setError('No target file specified');
-      return;
-    }
-
     setIsInserting(true);
     setError(null);
 
@@ -36,11 +31,20 @@ export const InsertSuggestion = ({
       let filename: string | undefined;
       
       if (targetFile) {
-        // Try to find file by savedFilename
-        const file = findFileBySavedFilename(targetFile);
+        // Try to find file by savedFilename (with or without timestamp prefix)
+        const file = findFileBySavedFilename(targetFile) || 
+                     findFileBySavedFilename(targetFile.replace(/^\d+-/, '')) ||
+                     useFileSystemStore.getState().files.find(f => 
+                       f.name === targetFile || 
+                       f.savedFilename === targetFile ||
+                       f.name === targetFile.replace(/^\d+-/, '')
+                     );
         if (file?.savedFilename) {
           filename = file.savedFilename;
+        } else if (file?.name) {
+          filename = file.name;
         } else {
+          // Use targetFile as-is (might be a filename that exists on disk)
           filename = targetFile;
         }
       } else if (activeFileId) {
@@ -53,7 +57,9 @@ export const InsertSuggestion = ({
       }
 
       if (!filename) {
-        throw new Error('Could not determine target file');
+        setError('No target file specified. Please open a file or specify a target file.');
+        setIsInserting(false);
+        return;
       }
 
       // Determine line number (default to end of file if not specified)

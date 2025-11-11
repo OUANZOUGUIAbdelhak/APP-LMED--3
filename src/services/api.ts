@@ -61,6 +61,12 @@ export interface ChatResponse {
     lineStart?: number;
     lineEnd?: number;
   }[];
+  createdFiles?: {
+    filename: string;
+    docId: string;
+    topic?: string;
+    title?: string;
+  }[];
 }
 
 /**

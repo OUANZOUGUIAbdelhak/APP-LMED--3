@@ -15,7 +15,7 @@ import { toolSpecs, executeTool } from './tools/index.js';
  * @param {Array<string>} options.mentionedDocuments - Documents mentioned by user (for cross-doc queries)
  * @returns {Promise<{response: string, toolCalls: Array}>}
  */
-export async function runAgentLoop({ message, history = [], retrieved = [], apiKey, model, uploadsDir, activeDocument, hasRelevantDocs = true, mentionedDocuments }) {
+export async function runAgentLoop({ message, history = [], retrieved = [], apiKey, model, uploadsDir, activeDocument, hasRelevantDocs = true, mentionedDocuments, vectorStore }) {
   const groq = new Groq({ apiKey });
 
   const systemPrompt = buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs, mentionedDocuments);
@@ -39,16 +39,31 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
   ];
   const isMetaQuestion = metaQuestionPatterns.some(pattern => pattern.test(message));
   
-  // Enable tools if no RAG results OR if it's a meta-question (workspace listing)
-  const enableTools = retrieved.length === 0 || isMetaQuestion;
+  // Detect article creation requests
+  const articleCreationPatterns = [
+    /create (an? )?(article|paper|document|latex|tex) (about|on|for)/i,
+    /(I want|I need|can you) (to )?create (an? )?(article|paper|document|latex|tex)/i,
+    /write (an? )?(article|paper|document) (about|on)/i,
+    /generate (an? )?(article|paper|document|latex|tex) (about|on)/i,
+    /make (an? )?(article|paper|document|latex|tex) (about|on)/i
+  ];
+  const isArticleCreation = articleCreationPatterns.some(pattern => pattern.test(message));
+  
+  // Enable tools if no RAG results OR if it's a meta-question (workspace listing) OR article creation
+  const enableTools = retrieved.length === 0 || isMetaQuestion || isArticleCreation;
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     let completion;
     try {
+      // Increase max_tokens and temperature for article creation to allow generating longer, more creative content
+      const isArticleCreationRequest = articleCreationPatterns.some(pattern => pattern.test(message));
+      const maxTokens = isArticleCreationRequest ? 4000 : 1200;
+      const temperature = isArticleCreationRequest ? 0.7 : (hasRelevantDocs ? 0.2 : 0.5); // Higher temperature for creative article writing
+      
       completion = await groq.chat.completions.create({
         model,
-        temperature: hasRelevantDocs ? 0.2 : 0.5, // Higher temperature for general knowledge
-        max_tokens: 1200,
+        temperature: temperature,
+        max_tokens: maxTokens,
         messages: currentMessages,
         tools: enableTools && toolSpecs.length > 0 ? toolSpecs : undefined,
         tool_choice: enableTools && toolSpecs.length > 0 ? 'auto' : undefined,
@@ -66,9 +81,15 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
 
     // If no tool calls, we're done
     if (!assistantMessage.tool_calls || assistantMessage.tool_calls.length === 0) {
+      // Extract created files from tool call log
+      const createdFiles = toolCallLog
+        .filter(tc => tc.createdFile)
+        .map(tc => tc.createdFile);
+      
       return {
         response: assistantMessage.content || '',
-        toolCalls: toolCallLog
+        toolCalls: toolCallLog,
+        createdFiles: createdFiles.length > 0 ? createdFiles : undefined
       };
     }
 
@@ -77,28 +98,69 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
       const toolName = toolCall.function.name;
       const toolArgs = JSON.parse(toolCall.function.arguments || '{}');
       
-      toolCallLog.push({ name: toolName, args: toolArgs });
-      
       let toolOutput;
       try {
-        toolOutput = await executeTool(toolName, toolArgs, { uploadsDir });
+        toolOutput = await executeTool(toolName, toolArgs, { uploadsDir, vectorStore });
       } catch (err) {
         toolOutput = `Error: ${err.message}`;
       }
+      
+      // Extract file creation metadata if create_latex_file was called
+      let createdFile = null;
+      if (toolName === 'create_latex_file') {
+        try {
+          const parsed = JSON.parse(toolOutput);
+          if (parsed.success && parsed.filename && parsed.docId) {
+            createdFile = {
+              filename: parsed.filename,
+              docId: parsed.docId,
+              topic: parsed.topic,
+              title: parsed.title
+            };
+          }
+        } catch (e) {
+          // Not JSON, continue normally
+        }
+      }
+      
+      toolCallLog.push({ 
+        name: toolName, 
+        args: toolArgs,
+        ...(createdFile && { createdFile })
+      });
 
+      // For create_latex_file, extract the message from JSON if it's structured
+      let toolContent = toolOutput;
+      if (toolName === 'create_latex_file') {
+        try {
+          const parsed = JSON.parse(toolOutput);
+          if (parsed.message) {
+            toolContent = parsed.message; // Use the human-readable message for the agent
+          }
+        } catch (e) {
+          // Not JSON, use as-is
+        }
+      }
+      
       currentMessages.push({
         role: 'tool',
         tool_call_id: toolCall.id,
         name: toolName,
-        content: toolOutput
+        content: toolContent
       });
     }
   }
 
   // Max iterations reached
+  // Extract created files from tool call log
+  const createdFiles = toolCallLog
+    .filter(tc => tc.createdFile)
+    .map(tc => tc.createdFile);
+  
   return {
     response: 'Agent reached maximum iterations without completing the task.',
-    toolCalls: toolCallLog
+    toolCalls: toolCallLog,
+    createdFiles: createdFiles.length > 0 ? createdFiles : undefined
   };
 }
 
@@ -112,7 +174,8 @@ function buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs, 
 - extract_document: Extract full text from a document (PDF, DOCX, TXT, XLSX, TEX)
 - read_file: Read specific lines from a text file
 - grep_files: Search for content across files
-- insert_text: Insert text into a file at a specific line/column position (use when user approves a suggestion)`;
+- insert_text: Insert text into a file at a specific line/column position (use when user approves a suggestion)
+- create_latex_file: Create a new LaTeX (.tex) file with article content about a specified topic`;
 
   if (activeDocument) {
     baseInstructions += `\n\n**IMPORTANT**: The user is currently viewing/asking about the document: "${activeDocument}"
@@ -132,7 +195,24 @@ DO NOT restrict yourself to only the active document when other documents are me
 - When working with .tex files, understand LaTeX syntax, commands, environments, and structure
 - For review requests (e.g., "Review my abstract"), read the relevant section and provide feedback on clarity, structure, grammar, and LaTeX formatting
 - When proposing edits, provide corrected LaTeX code blocks that maintain proper syntax
-- Use insert_text tool only when the user explicitly approves a suggestion (e.g., "yes, insert that" or "apply the changes")
+- Use insert_text tool when the user explicitly approves a suggestion OR when automatically populating a newly created LaTeX file with content
+- **Creating LaTeX Articles**: When the user asks to create an article, paper, or document about a topic (e.g., "create an article about machine learning", "I want to write a paper on quantum computing"), you MUST:
+  1. First, call create_latex_file with the topic to create the file structure
+  2. Read the created file using read_file to see the exact structure and line numbers
+  3. Then AUTOMATICALLY generate meaningful, detailed content about the topic
+  4. Use insert_text tool MULTIPLE TIMES to insert the generated content into the appropriate sections:
+     - Find the line with "\\begin{abstract}" and insert abstract content on the next line
+     - Find "\\section{Introduction}" and insert introduction content after it
+     - Find "\\section{Background and Fundamentals}" and insert background content after it
+     - Find "\\section{Key Concepts and Principles}" and insert key concepts content after it
+     - Find "\\section{Applications and Use Cases}" and insert applications content after it
+     - Find "\\section{Current Developments and Future Directions}" and insert developments content after it
+     - Find "\\section{Conclusion}" and insert conclusion content after it
+  5. Generate comprehensive, well-written content (2-4 paragraphs per section) that is informative and relevant to the topic
+  6. Use proper LaTeX formatting (\\paragraph{}, \\textbf{}, \\textit{}, \\emph{}, etc.) where appropriate
+  7. DO NOT ask for permission - automatically insert all the content after creating the file
+  8. The user expects a complete article with actual content, not just a template with placeholders
+  9. After inserting all content, read the file again to verify everything was inserted correctly
 
 **Cross-Document Reasoning**:
 - When asked to synthesize information from multiple documents (e.g., "Based on document X and Y, what is the best conclusion?"), use extract_document or grep_files to read all referenced documents

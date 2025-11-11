@@ -27,6 +27,19 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
   const attachedFile = message.attachedFile ? getFileById(message.attachedFile) : null;
   const activeFile = activeFileId ? getFileById(activeFileId) : null;
 
+  // Helper function to resolve source file - must be defined before detectInsertionSuggestions
+  const resolveSourceFile = (source: NonNullable<ChatMessage['sources']>[number]) => {
+    if (source.docId) {
+      const byDoc = findFileByDocId(source.docId);
+      if (byDoc) return byDoc;
+    }
+    if (source.filename) {
+      const bySaved = findFileBySavedFilename(source.filename);
+      if (bySaved) return bySaved;
+    }
+    return null;
+  };
+
   // Detect insertion suggestions in assistant messages
   // Look for code blocks, especially LaTeX, and phrases like "insert", "add", "would you like me to insert"
   const detectInsertionSuggestions = () => {
@@ -51,8 +64,63 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
       const lastMatch = matches[matches.length - 1];
       const suggestedText = lastMatch[1].trim();
       
-      // Determine target file
-      const targetFile = activeFile?.savedFilename || activeFile?.name;
+      // Determine target file - try multiple strategies
+      let targetFile: string | undefined;
+      
+      // Strategy 1: Use active file if available
+      if (activeFile) {
+        targetFile = activeFile.savedFilename || activeFile.name;
+      }
+      
+      // Strategy 2: Try to extract filename from message content
+      if (!targetFile) {
+        // Look for patterns like "into your article", "into the file", "into [filename]"
+        const filePatterns = [
+          /into\s+(?:your|the|this)\s+(?:article|file|document|latex|tex)\s+(?:called|named)?\s*["']?([^\s"']+\.(?:tex|latex|txt|md))["']?/i,
+          /into\s+["']?([^\s"']+\.(?:tex|latex|txt|md))["']?/i,
+          /(?:file|document|article)\s+["']?([^\s"']+\.(?:tex|latex|txt|md))["']?/i,
+        ];
+        
+        for (const pattern of filePatterns) {
+          const match = message.content.match(pattern);
+          if (match && match[1]) {
+            const potentialFilename = match[1];
+            // Try to find this file in the file system
+            const allFiles = useFileSystemStore.getState().files;
+            const foundFile = findFileBySavedFilename(potentialFilename) || 
+                             findFileBySavedFilename(potentialFilename.replace(/^\d+-/, '')) ||
+                             allFiles.find(f => f.name === potentialFilename);
+            if (foundFile) {
+              targetFile = foundFile.savedFilename || foundFile.name;
+              break;
+            }
+          }
+        }
+      }
+      
+      // Strategy 3: If message has sources, try to use the first source file
+      if (!targetFile && message.sources && message.sources.length > 0) {
+        const sourceFile = resolveSourceFile(message.sources[0]);
+        if (sourceFile) {
+          targetFile = sourceFile.savedFilename || sourceFile.name;
+        }
+      }
+      
+      // Strategy 4: Look for recently created files (check if message mentions creating a file)
+      if (!targetFile) {
+        const createdFilePattern = /created.*?["']?([^\s"']+\.(?:tex|latex))["']?/i;
+        const createdMatch = message.content.match(createdFilePattern);
+        if (createdMatch && createdMatch[1]) {
+          const createdFilename = createdMatch[1];
+          const allFiles = useFileSystemStore.getState().files;
+          const foundFile = findFileBySavedFilename(createdFilename) ||
+                           findFileBySavedFilename(createdFilename.replace(/^\d+-/, '')) ||
+                           allFiles.find(f => f.name === createdFilename);
+          if (foundFile) {
+            targetFile = foundFile.savedFilename || foundFile.name;
+          }
+        }
+      }
       
       return {
         text: suggestedText,
@@ -65,18 +133,6 @@ const MessageBubble = ({ message }: { message: ChatMessage }) => {
   };
 
   const insertionSuggestion = detectInsertionSuggestions();
-
-  const resolveSourceFile = (source: NonNullable<ChatMessage['sources']>[number]) => {
-    if (source.docId) {
-      const byDoc = findFileByDocId(source.docId);
-      if (byDoc) return byDoc;
-    }
-    if (source.filename) {
-      const bySaved = findFileBySavedFilename(source.filename);
-      if (bySaved) return bySaved;
-    }
-    return null;
-  };
 
   const handleSourceClick = (source: NonNullable<ChatMessage['sources']>[number]) => {
     const file = resolveSourceFile(source);
