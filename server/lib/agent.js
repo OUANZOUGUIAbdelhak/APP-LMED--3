@@ -12,12 +12,13 @@ import { toolSpecs, executeTool } from './tools/index.js';
  * @param {string} options.uploadsDir - Workspace directory path
  * @param {string} options.activeDocument - Currently selected/attached document filename
  * @param {boolean} options.hasRelevantDocs - Whether relevant docs were found
+ * @param {Array<string>} options.mentionedDocuments - Documents mentioned by user (for cross-doc queries)
  * @returns {Promise<{response: string, toolCalls: Array}>}
  */
-export async function runAgentLoop({ message, history = [], retrieved = [], apiKey, model, uploadsDir, activeDocument, hasRelevantDocs = true }) {
+export async function runAgentLoop({ message, history = [], retrieved = [], apiKey, model, uploadsDir, activeDocument, hasRelevantDocs = true, mentionedDocuments }) {
   const groq = new Groq({ apiKey });
 
-  const systemPrompt = buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs);
+  const systemPrompt = buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs, mentionedDocuments);
   const messages = [
     { role: 'system', content: systemPrompt },
     ...history.slice(-6),
@@ -101,7 +102,7 @@ export async function runAgentLoop({ message, history = [], retrieved = [], apiK
   };
 }
 
-function buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs) {
+function buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs, mentionedDocuments) {
   let baseInstructions = `You are a helpful AI assistant with access to a document workspace.
 
 **Workspace**: All user documents are in a dedicated uploads directory. Use relative paths (e.g., "document.pdf", "folder/file.txt") when calling tools.
@@ -115,8 +116,9 @@ function buildSystemPrompt(message, retrieved, activeDocument, hasRelevantDocs) 
 
   if (activeDocument) {
     baseInstructions += `\n\n**IMPORTANT**: The user is currently viewing/asking about the document: "${activeDocument}"
-When the user says "this document" or "the document", they are referring to "${activeDocument}".
-Use extract_document tool with that filename to read its content.`;
+When the user says "this document" or "the document" (without specifying a name), they are referring to "${activeDocument}".
+However, if the user mentions OTHER documents by name (e.g., "document X", "the PDF file Y", "from document Z"), you MUST search for and read those documents using extract_document or grep_files tools.
+DO NOT restrict yourself to only the active document when other documents are mentioned.`;
   }
 
   baseInstructions += `\n\n**Workflow for questions**:
@@ -134,9 +136,13 @@ Use extract_document tool with that filename to read its content.`;
 
 **Cross-Document Reasoning**:
 - When asked to synthesize information from multiple documents (e.g., "Based on document X and Y, what is the best conclusion?"), use extract_document or grep_files to read all referenced documents
+- CRITICAL: Even if a LaTeX file is currently open, if the user mentions OTHER documents (by name, like "document X", "the PDF", "file Y"), you MUST search across ALL documents in the workspace to find and read those documents
+- Use grep_files or extract_document to find documents mentioned by the user, even if they're not the currently active document
+${mentionedDocuments && mentionedDocuments.length > 0 ? `- **IMPORTANT**: The user mentioned these documents: ${mentionedDocuments.join(', ')}. You MUST find and read these documents using list_dir to find the exact filename, then extract_document to read their content.` : ''}
 - Analyze and synthesize information from multiple sources before providing answers
 - When proposing text for insertion (like conclusions or summaries), clearly indicate which documents were used as sources
 - Ask for confirmation before inserting synthesized text: "Would you like me to insert this text into your article?"
+- Example: If user says "take the abstract from document X and put it in my LaTeX file", you must: 1) Use list_dir to see all files, 2) Find document X (may have timestamp prefix), 3) Read document X using extract_document with the exact filename, 4) Extract the abstract section, 5) Propose inserting it into the LaTeX file using proper LaTeX formatting
 
 **Important**: If the user asks a question and no relevant information is found in the documents after searching, provide a helpful general answer based on your knowledge and clearly state that this information is not from the documents.`;
 

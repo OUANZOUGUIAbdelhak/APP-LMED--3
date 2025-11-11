@@ -437,9 +437,64 @@ app.post('/api/agent/chat', async (req, res) => {
       }
     }
 
+    // Detect if user mentions OTHER documents (not just the active one)
+    // This is critical: when a LaTeX file is open but user asks about other documents,
+    // we need to search across ALL documents, not just the active LaTeX file
+    
+    // Patterns that suggest user wants to reference other documents:
+    const crossDocumentPhrases = [
+      /(?:take|get|extract|read|use|copy|find)\s+(?:the|from|in)\s+(?:document|file|pdf|docx)/gi,
+      /(?:from|in|of)\s+(?:the\s+)?(?:document|file|pdf|docx)\s+([A-Za-z0-9_\-\.]+)/gi,
+      /document\s+([A-Za-z0-9_\-\.]+(?:\.(?:pdf|docx|txt|tex|md|xlsx))?)/gi,
+      /file\s+([A-Za-z0-9_\-\.]+(?:\.(?:pdf|docx|txt|tex|md|xlsx))?)/gi,
+      /(?:the\s+)?(?:pdf|docx|file)\s+([A-Za-z0-9_\-\.]+)/gi,
+      /based\s+on\s+(?:document|file|pdf)/gi,
+    ];
+    
+    const mentionedDocuments = [];
+    let hasCrossDocumentIntent = false;
+    
+    // Check for cross-document intent phrases
+    for (const pattern of crossDocumentPhrases) {
+      // Reset regex lastIndex to avoid issues with global regex
+      pattern.lastIndex = 0;
+      if (pattern.test(message)) {
+        hasCrossDocumentIntent = true;
+        // Reset again before matchAll
+        pattern.lastIndex = 0;
+        // Try to extract document names
+        const matches = Array.from(message.matchAll(pattern));
+        for (const match of matches) {
+          if (match[1]) {
+            mentionedDocuments.push(match[1].toLowerCase());
+          }
+        }
+      }
+    }
+    
+    // Also check for explicit filename mentions with extensions
+    const filenamePattern = /([A-Za-z0-9_\-\.]+\.(?:pdf|docx|txt|tex|md|xlsx))/gi;
+    const filenameMatches = Array.from(message.matchAll(filenamePattern));
+    filenameMatches.forEach(match => {
+      if (match[1]) {
+        mentionedDocuments.push(match[1].toLowerCase());
+      }
+    });
+
+    // If user mentions other documents OR has cross-document intent, don't restrict search
+    const shouldSearchAllDocuments = mentionedDocuments.length > 0 || hasCrossDocumentIntent;
+    
     // If a document is attached inline, index it as a transient doc
     let restrictDocIds = Array.isArray(documentIds) && documentIds.length > 0 ? documentIds : undefined;
     let useRag = Boolean(restrictDocIds && restrictDocIds.length > 0);
+    
+    // Override restriction if user mentions other documents
+    if (shouldSearchAllDocuments) {
+      restrictDocIds = undefined;
+      useRag = false;
+      console.log(`🔍 User mentioned other documents: ${mentionedDocuments.join(', ')}. Searching across ALL documents.`);
+    }
+    
     if (!useRag && document?.filename && isMeaningfulDocument(document)) {
       const parsed = await parseTextDirect(document.content, document.filename);
       const docId = `transient-${uuidv4()}`;
@@ -503,6 +558,7 @@ app.post('/api/agent/chat', async (req, res) => {
     }
 
     // Run agent loop with tools + RAG
+    // Pass information about mentioned documents to help agent find them
     const { response: answer, toolCalls } = await runAgentLoop({
       message,
       history,
@@ -511,7 +567,8 @@ app.post('/api/agent/chat', async (req, res) => {
       model: process.env.GROQ_MODEL || 'llama-3.1-70b-versatile',
       uploadsDir: UPLOAD_DIR,
       activeDocument: activeDocumentName,
-      hasRelevantDocs
+      hasRelevantDocs,
+      mentionedDocuments: mentionedDocuments.length > 0 ? mentionedDocuments : undefined
     });
 
     if (sessionId) memoryStore.append(sessionId, { role: 'user', content: message }, { role: 'assistant', content: answer });
